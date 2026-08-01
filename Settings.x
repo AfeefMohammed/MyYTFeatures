@@ -3,8 +3,10 @@
 #import <YouTubeHeader/YTSettingsSectionItemManager.h>
 #import <YouTubeHeader/YTSettingsViewController.h>
 #import <YouTubeHeader/YTSettingsGroupData.h>
+#import <YouTubeHeader/YTIIcon.h>
 
-#define TweakSection 888
+// Use a unique char code to prevent duplication bugs across the settings menu
+static const NSInteger TweakSection = 'myyt';
 
 BOOL IsEnabled(NSString *key) {
     return [[NSUserDefaults standardUserDefaults] boolForKey:key];
@@ -48,10 +50,8 @@ BOOL IsEnabled(NSString *key) {
         @{@"key": @"videoEndTime", @"title": @"Show End Time"},
         @{@"key": @"noCast", @"title": @"Hide Cast Button"},
         @{@"key": @"removeUploads", @"title": @"Hide Create (+) Button"},
-        @{@"key": @"saveProfilePhoto", @"title": @"Save Profile Photo"},
         @{@"key": @"postManager", @"title": @"Post Manager"},
-        @{@"key": @"commentManager", @"title": @"Comment Manager"},
-        @{@"key": @"tapToSeek", @"title": @"Enable Tap to Seek"}
+        @{@"key": @"commentManager", @"title": @"Comment Manager"}
     ];
     
     for (NSDictionary *dict in tweakKeys) {
@@ -69,10 +69,18 @@ BOOL IsEnabled(NSString *key) {
     }
     
     YTSettingsViewController *settingsViewController = [self valueForKey:@"_settingsViewControllerDelegate"];
+    
+    // Add the native YouTube "Tune/Sliders" icon (Type 102)
+    YTIIcon *icon = [%c(YTIIcon) new];
+    if ([icon respondsToSelector:@selector(setIconType:)]) {
+        icon.iconType = 102; 
+    }
+
     if ([settingsViewController respondsToSelector:@selector(setSectionItems:forCategory:title:icon:titleDescription:headerHidden:)]) {
-        [settingsViewController setSectionItems:sectionItems forCategory:TweakSection title:@"My YT Features" icon:nil titleDescription:nil headerHidden:NO];
+        // Updated title to "YtLite Custom"
+        [settingsViewController setSectionItems:sectionItems forCategory:TweakSection title:@"YtLite Custom" icon:icon titleDescription:nil headerHidden:NO];
     } else {
-        [settingsViewController setSectionItems:sectionItems forCategory:TweakSection title:@"My YT Features" titleDescription:nil headerHidden:NO];
+        [settingsViewController setSectionItems:sectionItems forCategory:TweakSection title:@"YtLite Custom" titleDescription:nil headerHidden:NO];
     }
 }
 

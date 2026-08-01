@@ -8,7 +8,6 @@
 
 extern BOOL IsEnabled(NSString *key);
 
-// Provide missing method declarations via categories to avoid compilation errors
 @interface YTDefaultSheetController (MyYT)
 + (instancetype)sheetControllerWithParentResponder:(id)responder;
 - (void)presentFromViewController:(id)vc animated:(BOOL)animated completion:(void(^)(void))completion;
@@ -87,33 +86,16 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
 %end
 
 
-// --- 2. HIDE CAST BUTTON ---
+// --- 2. HIDE CAST BUTTON (Gap Fix) ---
 %hook MDXPlaybackRouteButtonController
 - (BOOL)isPersistentCastIconEnabled { 
-    if (IsEnabled(@"noCast")) {
-        return NO;
-    }
-    return %orig;
-}
-- (void)updateRouteButton:(id)arg1 { 
-    if (!IsEnabled(@"noCast")) {
-        %orig;
-    }
-}
-- (void)updateAllRouteButtons { 
-    if (!IsEnabled(@"noCast")) {
-        %orig;
-    }
+    return IsEnabled(@"noCast") ? NO : %orig;
 }
 %end
 
 %hook YTSettings
 - (void)setDisableMDXDeviceDiscovery:(BOOL)arg1 {
-    if (IsEnabled(@"noCast")) {
-        %orig(YES);
-    } else {
-        %orig;
-    }
+    %orig(IsEnabled(@"noCast") ? YES : arg1);
 }
 %end
 
@@ -124,6 +106,8 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
     for (UIView *subview in viewSelf.subviews) {
         if (IsEnabled(@"noCast") && [subview.accessibilityIdentifier isEqualToString:@"id.mdx.playbackroute.button"]) {
             subview.hidden = YES;
+            subview.frame = CGRectZero; // Collapses the frame to remove the gap
+            [subview removeFromSuperview];
         }
     }
 }
@@ -149,18 +133,7 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
 %end
 
 
-// --- 4. TAP TO SEEK ---
-%hook YTInlinePlayerBarContainerView
-- (BOOL)canTapToSeek {
-    if (IsEnabled(@"tapToSeek")) {
-        return YES;
-    }
-    return %orig;
-}
-%end
-
-
-// --- 5. MEDIA MANAGERS (PFP, Post, Comment) ---
+// --- 4. MEDIA MANAGERS (Post, Comment) ---
 @interface ASDisplayNode : NSObject
 @property (nonatomic, assign, readonly) UIViewController *closestViewController;
 @property (atomic, assign, readonly) NSEnumerator *supernodes;
@@ -169,17 +142,11 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
 
 @interface ELMContainerNode : ASDisplayNode
 @property (nonatomic, strong, readwrite) NSString *copiedComment;
-@property (nonatomic, strong, readwrite) NSURL *copiedURL;
-@end
-
-@interface ASNetworkImageNode : ASDisplayNode
-@property (atomic, copy, readwrite) NSURL *URL;
 @end
 
 @interface _ASDisplayView : UIView
 @property (nonatomic, strong, readwrite) ASDisplayNode *keepalive_node;
 - (void)postManager:(UILongPressGestureRecognizer *)sender;
-- (void)savePFP:(UILongPressGestureRecognizer *)sender;
 - (void)commentManager:(UILongPressGestureRecognizer *)sender;
 @end
 
@@ -198,7 +165,6 @@ static void genImageFromLayer(CALayer *layer, UIColor *backgroundColor, void (^c
 
 %hook ELMContainerNode
 %property (nonatomic, strong) NSString *copiedComment;
-%property (nonatomic, strong) NSURL *copiedURL;
 %end
 
 %hook ASDisplayNode
@@ -225,7 +191,6 @@ static void genImageFromLayer(CALayer *layer, UIColor *backgroundColor, void (^c
     %orig;
     NSArray *gesturesInfo = @[
         @{@"selector": @"postManager:", @"text": @"id.ui.backstage.original_post", @"key": @(IsEnabled(@"postManager"))},
-        @{@"selector": @"savePFP:", @"text": @"ELMImageNode-View", @"key": @(IsEnabled(@"saveProfilePhoto"))},
         @{@"selector": @"commentManager:", @"text": @"id.ui.comment_cell", @"key": @(IsEnabled(@"commentManager"))}
     ];
 
@@ -236,25 +201,6 @@ static void genImageFromLayer(CALayer *layer, UIColor *backgroundColor, void (^c
             longPress.minimumPressDuration = 0.3;
             [self addGestureRecognizer:longPress];
             break;
-        }
-    }
-}
-
-%new
-- (void)savePFP:(UILongPressGestureRecognizer *)sender {
-    if (sender.state == UIGestureRecognizerStateBegan) {
-        ASNetworkImageNode *imageNode = (ASNetworkImageNode *)self.keepalive_node;
-        NSString *URLString = imageNode.URL.absoluteString;
-        if (URLString) {
-            NSURL *PFPURL = [NSURL URLWithString:URLString];
-            UIImage *image = [UIImage imageWithData:[NSData dataWithContentsOfURL:PFPURL]];
-            if (image) {
-                YTDefaultSheetController *sheetController = [%c(YTDefaultSheetController) sheetControllerWithParentResponder:nil];
-                [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Save Profile Picture" iconImage:nil style:0 handler:^(id action) {
-                    UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil);
-                }]];
-                [sheetController presentFromViewController:self.keepalive_node.closestViewController animated:YES completion:nil];
-            }
         }
     }
 }
