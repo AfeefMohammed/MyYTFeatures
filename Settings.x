@@ -17,10 +17,17 @@ BOOL IsEnabled(NSString *key) {
 
 %hook YTSettingsGroupData
 - (NSArray <NSNumber *> *)orderedCategories {
-    // This filter prevents the duplication bug by ensuring we only inject into the primary Tweaks group (Type 1)
-    if (self.type != 1 || class_getClassMethod(objc_getClass("YTSettingsGroupData"), @selector(tweaks))) {
+    // 1. If YouGroupSettings is installed, dynamically inject our ID into its whitelist array
+    if (class_getClassMethod(objc_getClass("YTSettingsGroupData"), @selector(tweaks))) {
+        NSMutableArray *tweaksArray = [%c(YTSettingsGroupData) performSelector:@selector(tweaks)];
+        if (![tweaksArray containsObject:@(TweakSection)]) {
+            [tweaksArray insertObject:@(TweakSection) atIndex:0]; // Adds to the top of the Tweaks menu
+        }
         return %orig;
     }
+
+    // 2. Fallback for when YouGroupSettings is NOT installed
+    if (self.type != 1) return %orig;
     NSArray *categories = %orig;
     if ([categories containsObject:@(TweakSection)]) return categories;
     NSMutableArray *mutableCategories = categories.mutableCopy;
@@ -73,7 +80,7 @@ BOOL IsEnabled(NSString *key) {
     
     YTSettingsViewController *settingsViewController = [self valueForKey:@"_settingsViewControllerDelegate"];
     
-    // Icon ID 211 is the Sliders/Tune icon on newer YT versions
+    // Set the native YouTube "Tune/Sliders" icon
     YTIIcon *icon = [%c(YTIIcon) new];
     if ([icon respondsToSelector:@selector(setIconType:)]) {
         icon.iconType = 211; 
