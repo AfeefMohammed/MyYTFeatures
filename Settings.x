@@ -3,6 +3,7 @@
 #import <YouTubeHeader/YTSettingsSectionItemManager.h>
 #import <YouTubeHeader/YTSettingsViewController.h>
 #import <YouTubeHeader/YTSettingsGroupData.h>
+#import <YouTubeHeader/YTIIcon.h>
 
 static const NSInteger TweakSection = 789;
 
@@ -77,9 +78,13 @@ BOOL IsEnabled(NSString *key) {
     
     YTSettingsViewController *settingsViewController = [self valueForKey:@"_settingsViewControllerDelegate"];
 
+    YTIIcon *icon = [%c(YTIIcon) new];
+    if ([icon respondsToSelector:@selector(setIconType:)]) {
+        icon.iconType = YT_TUNE; 
+    }
+
     if ([settingsViewController respondsToSelector:@selector(setSectionItems:forCategory:title:icon:titleDescription:headerHidden:)]) {
-        // Passing 'nil' for the icon lets YouGroupSettings automatically apply a gear icon
-        [settingsViewController setSectionItems:sectionItems forCategory:TweakSection title:@"YtLite Custom" icon:nil titleDescription:nil headerHidden:NO];
+        [settingsViewController setSectionItems:sectionItems forCategory:TweakSection title:@"YtLite Custom" icon:icon titleDescription:nil headerHidden:NO];
     } else {
         [settingsViewController setSectionItems:sectionItems forCategory:TweakSection title:@"YtLite Custom" titleDescription:nil headerHidden:NO];
     }

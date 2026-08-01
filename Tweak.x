@@ -1,9 +1,10 @@
 #import <UIKit/UIKit.h>
 #import <Photos/Photos.h>
+#import <objc/message.h>
+#import <objc/runtime.h>
 #import <YouTubeHeader/YTPlayerViewController.h>
 #import <YouTubeHeader/YTInlinePlayerBarContainerView.h>
 #import <YouTubeHeader/YTMainAppVideoPlayerOverlayView.h>
-#import <YouTubeHeader/YTActionSheetAction.h>
 #import <YouTubeHeader/YTDefaultSheetController.h>
 
 extern BOOL IsEnabled(NSString *key);
@@ -85,31 +86,10 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
 }
 %end
 
-
-// --- 2. HIDE CAST BUTTON ---
+// --- 2. HIDE CAST BUTTON (Safe Method) ---
 %hook MDXPlaybackRouteButtonController
 - (BOOL)isPersistentCastIconEnabled { 
     return IsEnabled(@"noCast") ? NO : %orig;
-}
-
-- (void)updateRouteButton:(UIView *)btn { 
-    %orig; // Must call orig first to avoid initialization crashes
-    if (IsEnabled(@"noCast")) {
-        btn.hidden = YES;
-        btn.alpha = 0.0;
-        
-        for (NSLayoutConstraint *constraint in btn.constraints) {
-            if (constraint.firstAttribute == NSLayoutAttributeWidth || constraint.firstAttribute == NSLayoutAttributeHeight) {
-                constraint.constant = 0;
-            }
-        }
-    }
-}
-
-- (void)updateAllRouteButtons { 
-    if (!IsEnabled(@"noCast")) {
-        %orig;
-    }
 }
 %end
 
@@ -122,51 +102,52 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
 %hook YTRightNavigationButtons
 - (void)layoutSubviews {
     %orig;
-    UIView *viewSelf = (UIView *)self;
-    for (UIView *subview in viewSelf.subviews) {
-        if (IsEnabled(@"noCast") && [subview.accessibilityIdentifier isEqualToString:@"id.mdx.playbackroute.button"]) {
-            subview.hidden = YES;
-            // Removed 'removeFromSuperview' to prevent iteration crash
-            subview.frame = CGRectZero; 
-        }
-    }
-}
-%end
-
-%hook YTMainAppControlsOverlayView
-- (void)layoutSubviews {
-    %orig;
     if (IsEnabled(@"noCast")) {
         UIView *viewSelf = (UIView *)self;
         for (UIView *subview in viewSelf.subviews) {
             if ([subview.accessibilityIdentifier isEqualToString:@"id.mdx.playbackroute.button"]) {
                 subview.hidden = YES;
-                subview.frame = CGRectZero;
             }
         }
     }
 }
 %end
 
+@interface YTMainAppVideoPlayerOverlayView (MyYTCast)
+@property (nonatomic, strong) UIView *playbackRouteButton;
+@end
+
+%hook YTMainAppVideoPlayerOverlayView
+- (void)layoutSubviews {
+    %orig;
+    if (IsEnabled(@"noCast")) {
+        if ([self respondsToSelector:@selector(playbackRouteButton)]) {
+            self.playbackRouteButton.hidden = YES;
+        }
+    }
+}
+%end
 
 // --- 3. HIDE CREATE BUTTON ---
 %hook YTPivotBarView
 - (void)setRenderer:(id)renderer {
     if (IsEnabled(@"removeUploads")) {
         NSMutableArray *items = [renderer performSelector:@selector(itemsArray)];
-        NSUInteger index = [items indexOfObjectPassingTest:^BOOL(id obj, NSUInteger idx, BOOL *stop) {
-            id iconOnlyRenderer = [obj respondsToSelector:@selector(pivotBarIconOnlyItemRenderer)] ? [obj performSelector:@selector(pivotBarIconOnlyItemRenderer)] : nil;
+        NSMutableIndexSet *indicesToRemove = [NSMutableIndexSet indexSet];
+        
+        for (NSUInteger i = 0; i < items.count; i++) {
+            id item = items[i];
+            id iconOnlyRenderer = [item respondsToSelector:@selector(pivotBarIconOnlyItemRenderer)] ? [item performSelector:@selector(pivotBarIconOnlyItemRenderer)] : nil;
             NSString *pivotIdentifier = [iconOnlyRenderer respondsToSelector:@selector(pivotIdentifier)] ? [iconOnlyRenderer performSelector:@selector(pivotIdentifier)] : nil;
-            return [pivotIdentifier isEqualToString:@"FEuploads"];
-        }];
-        if (index != NSNotFound) {
-            [items removeObjectAtIndex:index];
+            if ([pivotIdentifier isEqualToString:@"FEuploads"]) {
+                [indicesToRemove addIndex:i];
+            }
         }
+        [items removeObjectsAtIndexes:indicesToRemove];
     }
-    %orig;
+    %orig(renderer);
 }
 %end
-
 
 // --- 4. MEDIA MANAGERS (Post, Comment) ---
 @interface ASDisplayNode : NSObject
@@ -195,6 +176,23 @@ static void genImageFromLayer(CALayer *layer, UIColor *backgroundColor, void (^c
     UIGraphicsEndImageContext();
     if (completionHandler) {
         completionHandler(image);
+    }
+}
+
+static void addSafeActionToSheet(id sheet, NSString *title, void (^handler)(void)) {
+    Class actionClass = NSClassFromString(@"YTActionSheetAction");
+    id action = nil;
+    if ([actionClass respondsToSelector:@selector(actionWithTitle:subtitle:iconImage:handler:)]) {
+        action = ((id (*)(Class, SEL, NSString *, NSString *, UIImage *, id))objc_msgSend)(actionClass, @selector(actionWithTitle:subtitle:iconImage:handler:), title, nil, nil, ^(__unused id act) {
+            if (handler) handler();
+        });
+    } else {
+        action = ((id (*)(Class, SEL, NSString *, NSInteger, id))objc_msgSend)(actionClass, @selector(actionWithTitle:style:handler:), title, 0, ^(__unused id act) {
+            if (handler) handler();
+        });
+    }
+    if (action && [sheet respondsToSelector:@selector(addAction:)]) {
+        [sheet performSelector:@selector(addAction:) withObject:action];
     }
 }
 
@@ -248,15 +246,18 @@ static void genImageFromLayer(CALayer *layer, UIColor *backgroundColor, void (^c
         CALayer *layer = self.layer;
         UIColor *backgroundColor = containerNode.closestViewController.view.backgroundColor;
 
-        YTDefaultSheetController *sheetController = [%c(YTDefaultSheetController) sheetControllerWithParentResponder:nil];
-        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Copy Post Text" iconImage:nil style:0 handler:^(id action) {
+        id sheetController = [%c(YTDefaultSheetController) sheetControllerWithParentResponder:nil];
+        
+        addSafeActionToSheet(sheetController, @"Copy Post Text", ^{
             if (text) [UIPasteboard generalPasteboard].string = text;
-        }]];
-        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Save Post As Image" iconImage:nil style:0 handler:^(id action) {
+        });
+        
+        addSafeActionToSheet(sheetController, @"Save Post As Image", ^{
             genImageFromLayer(layer, backgroundColor, ^(UIImage *image) {
                 UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil);
             });
-        }]];
+        });
+
         [sheetController presentFromViewController:containerNode.closestViewController animated:YES completion:nil];
     }
 }
@@ -269,15 +270,18 @@ static void genImageFromLayer(CALayer *layer, UIColor *backgroundColor, void (^c
         CALayer *layer = self.layer;
         UIColor *backgroundColor = containerNode.closestViewController.view.backgroundColor;
 
-        YTDefaultSheetController *sheetController = [%c(YTDefaultSheetController) sheetControllerWithParentResponder:nil];
-        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Copy Comment Text" iconImage:nil style:0 handler:^(id action) {
+        id sheetController = [%c(YTDefaultSheetController) sheetControllerWithParentResponder:nil];
+        
+        addSafeActionToSheet(sheetController, @"Copy Comment Text", ^{
             if (comment) [UIPasteboard generalPasteboard].string = comment;
-        }]];
-        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Save Comment As Image" iconImage:nil style:0 handler:^(id action) {
+        });
+        
+        addSafeActionToSheet(sheetController, @"Save Comment As Image", ^{
             genImageFromLayer(layer, backgroundColor, ^(UIImage *image) {
                 UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil);
             });
-        }]];
+        });
+
         [sheetController presentFromViewController:containerNode.closestViewController animated:YES completion:nil];
     }
 }
