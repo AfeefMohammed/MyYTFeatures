@@ -12,6 +12,7 @@ extern BOOL IsEnabled(NSString *key);
 @interface YTDefaultSheetController (MyYT)
 + (instancetype)sheetControllerWithParentResponder:(id)responder;
 - (void)presentFromViewController:(id)vc animated:(BOOL)animated completion:(void(^)(void))completion;
+- (void)addAction:(id)action;
 @end
 
 // --- 1. SHOW END TIME ---
@@ -22,7 +23,6 @@ extern BOOL IsEnabled(NSString *key);
 void addEndTime(YTPlayerViewController *self, id video, id time) {
     if (!IsEnabled(@"videoEndTime")) return;
 
-    // Use Key-Value Coding to safely extract values without throwing compiler type mismatch errors
     CGFloat rate = 1.0;
     if ([video respondsToSelector:@selector(playbackRate)]) {
         rate = [[video valueForKey:@"playbackRate"] floatValue];
@@ -250,7 +250,7 @@ static void genImageFromLayer(CALayer *layer, UIColor *backgroundColor, void (^c
             UIImage *image = [UIImage imageWithData:[NSData dataWithContentsOfURL:PFPURL]];
             if (image) {
                 YTDefaultSheetController *sheetController = [%c(YTDefaultSheetController) sheetControllerWithParentResponder:nil];
-                [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Save Profile Picture" iconImage:nil style:0 handler:^(YTActionSheetAction *action) {
+                [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Save Profile Picture" iconImage:nil style:0 handler:^(id action) {
                     UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil);
                 }]];
                 [sheetController presentFromViewController:self.keepalive_node.closestViewController animated:YES completion:nil];
@@ -268,10 +268,10 @@ static void genImageFromLayer(CALayer *layer, UIColor *backgroundColor, void (^c
         UIColor *backgroundColor = containerNode.closestViewController.view.backgroundColor;
 
         YTDefaultSheetController *sheetController = [%c(YTDefaultSheetController) sheetControllerWithParentResponder:nil];
-        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Copy Post Text" iconImage:nil style:0 handler:^(YTActionSheetAction *action) {
+        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Copy Post Text" iconImage:nil style:0 handler:^(id action) {
             if (text) [UIPasteboard generalPasteboard].string = text;
         }]];
-        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Save Post As Image" iconImage:nil style:0 handler:^(YTActionSheetAction *action) {
+        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Save Post As Image" iconImage:nil style:0 handler:^(id action) {
             genImageFromLayer(layer, backgroundColor, ^(UIImage *image) {
                 UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil);
             });
@@ -289,10 +289,10 @@ static void genImageFromLayer(CALayer *layer, UIColor *backgroundColor, void (^c
         UIColor *backgroundColor = containerNode.closestViewController.view.backgroundColor;
 
         YTDefaultSheetController *sheetController = [%c(YTDefaultSheetController) sheetControllerWithParentResponder:nil];
-        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Copy Comment Text" iconImage:nil style:0 handler:^(YTActionSheetAction *action) {
+        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Copy Comment Text" iconImage:nil style:0 handler:^(id action) {
             if (comment) [UIPasteboard generalPasteboard].string = comment;
         }]];
-        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Save Comment As Image" iconImage:nil style:0 handler:^(YTActionSheetAction *action) {
+        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Save Comment As Image" iconImage:nil style:0 handler:^(id action) {
             genImageFromLayer(layer, backgroundColor, ^(UIImage *image) {
                 UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil);
             });
