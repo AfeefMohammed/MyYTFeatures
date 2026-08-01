@@ -91,6 +91,29 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
 - (BOOL)isPersistentCastIconEnabled { 
     return IsEnabled(@"noCast") ? NO : %orig;
 }
+
+- (void)updateRouteButton:(UIView *)btn { 
+    if (IsEnabled(@"noCast")) {
+        btn.hidden = YES;
+        btn.alpha = 0.0;
+        btn.frame = CGRectZero;
+        
+        // Force width constraints to 0 to collapse the StackView gap
+        for (NSLayoutConstraint *constraint in btn.constraints) {
+            if (constraint.firstAttribute == NSLayoutAttributeWidth || constraint.firstAttribute == NSLayoutAttributeHeight) {
+                constraint.constant = 0;
+            }
+        }
+        return;
+    }
+    %orig;
+}
+
+- (void)updateAllRouteButtons { 
+    if (!IsEnabled(@"noCast")) {
+        %orig;
+    }
+}
 %end
 
 %hook YTSettings
@@ -99,6 +122,7 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
 }
 %end
 
+// Hide from top navigation bar
 %hook YTRightNavigationButtons
 - (void)layoutSubviews {
     %orig;
@@ -106,8 +130,25 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
     for (UIView *subview in viewSelf.subviews) {
         if (IsEnabled(@"noCast") && [subview.accessibilityIdentifier isEqualToString:@"id.mdx.playbackroute.button"]) {
             subview.hidden = YES;
-            subview.frame = CGRectZero; // Collapses the frame to remove the gap
+            subview.frame = CGRectZero;
             [subview removeFromSuperview];
+        }
+    }
+}
+%end
+
+// Hide from the video player overlay to remove the void gap
+%hook YTMainAppControlsOverlayView
+- (void)layoutSubviews {
+    %orig;
+    if (IsEnabled(@"noCast")) {
+        UIView *viewSelf = (UIView *)self;
+        for (UIView *subview in viewSelf.subviews) {
+            if ([subview.accessibilityIdentifier isEqualToString:@"id.mdx.playbackroute.button"]) {
+                subview.hidden = YES;
+                subview.frame = CGRectZero;
+                [subview removeFromSuperview];
+            }
         }
     }
 }

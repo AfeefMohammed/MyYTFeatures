@@ -5,8 +5,8 @@
 #import <YouTubeHeader/YTSettingsGroupData.h>
 #import <YouTubeHeader/YTIIcon.h>
 
-// Use a unique char code to prevent duplication bugs across the settings menu
-static const NSInteger TweakSection = 'myyt';
+// Use the exact section ID that YTLite uses to avoid array sorting conflicts
+static const NSInteger TweakSection = 789;
 
 BOOL IsEnabled(NSString *key) {
     return [[NSUserDefaults standardUserDefaults] boolForKey:key];
@@ -16,27 +16,16 @@ BOOL IsEnabled(NSString *key) {
 - (void)updateMyYTFeaturesSectionWithEntry:(id)entry;
 @end
 
-%hook YTSettingsGroupData
-- (NSArray <NSNumber *> *)orderedCategories {
-    NSArray *categories = %orig;
-    if ([categories containsObject:@(TweakSection)]) return categories;
-    NSMutableArray *mutableCategories = categories.mutableCopy;
-    [mutableCategories insertObject:@(TweakSection) atIndex:0];
-    return mutableCategories.copy;
-}
-%end
-
+// Inject ONLY into the presentation data to prevent duplication
 %hook YTAppSettingsPresentationData
-+ (NSArray <NSNumber *> *)settingsCategoryOrder {
-    NSArray <NSNumber *> *order = %orig;
-    if ([order containsObject:@(TweakSection)]) return order;
++ (NSArray *)settingsCategoryOrder {
+    NSArray *order = %orig;
+    NSMutableArray *mutableOrder = [order mutableCopy];
     NSUInteger insertIndex = [order indexOfObject:@(1)];
     if (insertIndex != NSNotFound) {
-        NSMutableArray <NSNumber *> *mutableOrder = [order mutableCopy];
         [mutableOrder insertObject:@(TweakSection) atIndex:insertIndex + 1];
-        return mutableOrder.copy;
     }
-    return order;
+    return mutableOrder.copy;
 }
 %end
 
@@ -70,14 +59,13 @@ BOOL IsEnabled(NSString *key) {
     
     YTSettingsViewController *settingsViewController = [self valueForKey:@"_settingsViewControllerDelegate"];
     
-    // Add the native YouTube "Tune/Sliders" icon (Type 102)
+    // Attempting ID 211 for Sliders/Tune. (If it fails, change this to 255 for a Settings Gear)
     YTIIcon *icon = [%c(YTIIcon) new];
     if ([icon respondsToSelector:@selector(setIconType:)]) {
-        icon.iconType = 102; 
+        icon.iconType = 211; 
     }
 
     if ([settingsViewController respondsToSelector:@selector(setSectionItems:forCategory:title:icon:titleDescription:headerHidden:)]) {
-        // Updated title to "YtLite Custom"
         [settingsViewController setSectionItems:sectionItems forCategory:TweakSection title:@"YtLite Custom" icon:icon titleDescription:nil headerHidden:NO];
     } else {
         [settingsViewController setSectionItems:sectionItems forCategory:TweakSection title:@"YtLite Custom" titleDescription:nil headerHidden:NO];
