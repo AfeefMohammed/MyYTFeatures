@@ -9,28 +9,20 @@
 extern BOOL IsEnabled(NSString *key);
 
 // --- 1. SHOW END TIME ---
-@interface YTSingleVideoTime : NSObject
-@property (nonatomic, assign, readonly) CGFloat time;
-@end
-
-@interface YTSingleVideoController : NSObject
-@property (nonatomic, assign, readonly) float playbackRate;
-@property (nonatomic, assign, readonly) CGFloat totalMediaTime;
-@end
-
-@interface YTLabel : UILabel
-@end
-
 @interface YTInlinePlayerBarContainerView (MyYT)
 @property (nonatomic, strong, readwrite) NSString *endTimeString;
-@property (nonatomic, strong, readwrite) YTLabel *durationLabel;
 @end
 
-void addEndTime(YTPlayerViewController *self, YTSingleVideoController *video, YTSingleVideoTime *time) {
+void addEndTime(YTPlayerViewController *self, id video, id time) {
     if (!IsEnabled(@"videoEndTime")) return;
 
-    CGFloat rate = video.playbackRate != 0 ? video.playbackRate : 1.0;
-    NSTimeInterval remainingTime = (lround(video.totalMediaTime) - lround(time.time)) / rate;
+    CGFloat rate = [video respondsToSelector:@selector(playbackRate)] ? [video playbackRate] : 1.0;
+    if (rate == 0) rate = 1.0;
+    
+    CGFloat totalMediaTime = [video respondsToSelector:@selector(totalMediaTime)] ? [video totalMediaTime] : 0.0;
+    CGFloat currentTime = [time respondsToSelector:@selector(time)] ? [time time] : 0.0;
+
+    NSTimeInterval remainingTime = (lround(totalMediaTime) - lround(currentTime)) / rate;
     NSDate *estimatedEndTime = [NSDate dateWithTimeIntervalSinceNow:remainingTime];
 
     NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
@@ -43,7 +35,7 @@ void addEndTime(YTPlayerViewController *self, YTSingleVideoController *video, YT
     YTMainAppVideoPlayerOverlayView *overlay = (YTMainAppVideoPlayerOverlayView *)[playerView valueForKey:@"_overlayView"];
     if (![overlay isKindOfClass:%c(YTMainAppVideoPlayerOverlayView)]) return;
 
-    YTLabel *durationLabel = overlay.playerBar.durationLabel;
+    UILabel *durationLabel = [overlay.playerBar valueForKey:@"durationLabel"];
     overlay.playerBar.endTimeString = formattedEndTime;
 
     if (![durationLabel.text containsString:formattedEndTime]) {
@@ -68,9 +60,11 @@ void addEndTime(YTPlayerViewController *self, YTSingleVideoController *video, YT
 - (void)setPeekableViewVisible:(BOOL)visible {
     %orig;
     if (!IsEnabled(@"videoEndTime")) return;
-    if (self.endTimeString && ![self.durationLabel.text containsString:self.endTimeString]) {
-        self.durationLabel.text = [self.durationLabel.text stringByAppendingString:[NSString stringWithFormat:@" • %@", self.endTimeString]];
-        [self.durationLabel sizeToFit];
+    
+    UILabel *durationLabel = [self valueForKey:@"durationLabel"];
+    if (self.endTimeString && ![durationLabel.text containsString:self.endTimeString]) {
+        durationLabel.text = [durationLabel.text stringByAppendingString:[NSString stringWithFormat:@" • %@", self.endTimeString]];
+        [durationLabel sizeToFit];
     }
 }
 %end
@@ -78,14 +72,31 @@ void addEndTime(YTPlayerViewController *self, YTSingleVideoController *video, YT
 
 // --- 2. HIDE CAST BUTTON ---
 %hook MDXPlaybackRouteButtonController
-- (BOOL)isPersistentCastIconEnabled { return IsEnabled(@"noCast") ? NO : %orig; }
-- (void)updateRouteButton:(id)arg1 { if (!IsEnabled(@"noCast")) %orig; }
-- (void)updateAllRouteButtons { if (!IsEnabled(@"noCast")) %orig; }
+- (BOOL)isPersistentCastIconEnabled { 
+    if (IsEnabled(@"noCast")) {
+        return NO;
+    }
+    return %orig;
+}
+- (void)updateRouteButton:(id)arg1 { 
+    if (!IsEnabled(@"noCast")) {
+        %orig;
+    }
+}
+- (void)updateAllRouteButtons { 
+    if (!IsEnabled(@"noCast")) {
+        %orig;
+    }
+}
 %end
 
 %hook YTSettings
 - (void)setDisableMDXDeviceDiscovery:(BOOL)arg1 {
-    %orig(IsEnabled(@"noCast") ? YES : arg1);
+    if (IsEnabled(@"noCast")) {
+        %orig(YES);
+    } else {
+        %orig;
+    }
 }
 %end
 
@@ -123,7 +134,10 @@ void addEndTime(YTPlayerViewController *self, YTSingleVideoController *video, YT
 // --- 4. TAP TO SEEK ---
 %hook YTInlinePlayerBarContainerView
 - (BOOL)canTapToSeek {
-    return IsEnabled(@"tapToSeek") ? YES : %orig;
+    if (IsEnabled(@"tapToSeek")) {
+        return YES;
+    }
+    return %orig;
 }
 %end
 
@@ -150,22 +164,6 @@ void addEndTime(YTPlayerViewController *self, YTSingleVideoController *video, YT
 - (void)savePFP:(UILongPressGestureRecognizer *)sender;
 - (void)commentManager:(UILongPressGestureRecognizer *)sender;
 @end
-
-static void downloadImageFromURL(UIResponder *responder, NSURL *URL, BOOL download) {
-    NSURLSession *session = [NSURLSession sharedSession];
-    [[session dataTaskWithURL:URL completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        if (data) {
-            if (download) {
-                [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
-                    PHAssetCreationRequest *request = [PHAssetCreationRequest creationRequestForAsset];
-                    [request addResourceWithType:PHAssetResourceTypePhoto data:data options:nil];
-                } completionHandler:nil];
-            } else {
-                [UIPasteboard generalPasteboard].image = [UIImage imageWithData:data];
-            }
-        }
-    }] resume];
-}
 
 static void genImageFromLayer(CALayer *layer, UIColor *backgroundColor, void (^completionHandler)(UIImage *)) {
     UIGraphicsBeginImageContextWithOptions(layer.frame.size, NO, 0.0);
