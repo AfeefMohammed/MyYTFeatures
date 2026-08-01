@@ -8,6 +8,12 @@
 
 extern BOOL IsEnabled(NSString *key);
 
+// Provide missing method declarations via categories to avoid compilation errors
+@interface YTDefaultSheetController (MyYT)
++ (instancetype)sheetControllerWithParentResponder:(id)responder;
+- (void)presentFromViewController:(id)vc animated:(BOOL)animated completion:(void(^)(void))completion;
+@end
+
 // --- 1. SHOW END TIME ---
 @interface YTInlinePlayerBarContainerView (MyYT)
 @property (nonatomic, strong, readwrite) NSString *endTimeString;
@@ -16,11 +22,22 @@ extern BOOL IsEnabled(NSString *key);
 void addEndTime(YTPlayerViewController *self, id video, id time) {
     if (!IsEnabled(@"videoEndTime")) return;
 
-    CGFloat rate = [video respondsToSelector:@selector(playbackRate)] ? [video playbackRate] : 1.0;
+    // Use Key-Value Coding to safely extract values without throwing compiler type mismatch errors
+    CGFloat rate = 1.0;
+    if ([video respondsToSelector:@selector(playbackRate)]) {
+        rate = [[video valueForKey:@"playbackRate"] floatValue];
+    }
     if (rate == 0) rate = 1.0;
     
-    CGFloat totalMediaTime = [video respondsToSelector:@selector(totalMediaTime)] ? [video totalMediaTime] : 0.0;
-    CGFloat currentTime = [time respondsToSelector:@selector(time)] ? [time time] : 0.0;
+    CGFloat totalMediaTime = 0.0;
+    if ([video respondsToSelector:@selector(totalMediaTime)]) {
+        totalMediaTime = [[video valueForKey:@"totalMediaTime"] floatValue];
+    }
+    
+    CGFloat currentTime = 0.0;
+    if ([time respondsToSelector:@selector(time)]) {
+        currentTime = [[time valueForKey:@"time"] floatValue];
+    }
 
     NSTimeInterval remainingTime = (lround(totalMediaTime) - lround(currentTime)) / rate;
     NSDate *estimatedEndTime = [NSDate dateWithTimeIntervalSinceNow:remainingTime];
@@ -103,7 +120,8 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
 %hook YTRightNavigationButtons
 - (void)layoutSubviews {
     %orig;
-    for (UIView *subview in self.subviews) {
+    UIView *viewSelf = (UIView *)self;
+    for (UIView *subview in viewSelf.subviews) {
         if (IsEnabled(@"noCast") && [subview.accessibilityIdentifier isEqualToString:@"id.mdx.playbackroute.button"]) {
             subview.hidden = YES;
         }
@@ -232,7 +250,7 @@ static void genImageFromLayer(CALayer *layer, UIColor *backgroundColor, void (^c
             UIImage *image = [UIImage imageWithData:[NSData dataWithContentsOfURL:PFPURL]];
             if (image) {
                 YTDefaultSheetController *sheetController = [%c(YTDefaultSheetController) sheetControllerWithParentResponder:nil];
-                [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Save Profile Picture" iconImage:nil style:0 handler:^{
+                [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Save Profile Picture" iconImage:nil style:0 handler:^(YTActionSheetAction *action) {
                     UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil);
                 }]];
                 [sheetController presentFromViewController:self.keepalive_node.closestViewController animated:YES completion:nil];
@@ -250,10 +268,10 @@ static void genImageFromLayer(CALayer *layer, UIColor *backgroundColor, void (^c
         UIColor *backgroundColor = containerNode.closestViewController.view.backgroundColor;
 
         YTDefaultSheetController *sheetController = [%c(YTDefaultSheetController) sheetControllerWithParentResponder:nil];
-        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Copy Post Text" iconImage:nil style:0 handler:^{
+        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Copy Post Text" iconImage:nil style:0 handler:^(YTActionSheetAction *action) {
             if (text) [UIPasteboard generalPasteboard].string = text;
         }]];
-        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Save Post As Image" iconImage:nil style:0 handler:^{
+        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Save Post As Image" iconImage:nil style:0 handler:^(YTActionSheetAction *action) {
             genImageFromLayer(layer, backgroundColor, ^(UIImage *image) {
                 UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil);
             });
@@ -271,10 +289,10 @@ static void genImageFromLayer(CALayer *layer, UIColor *backgroundColor, void (^c
         UIColor *backgroundColor = containerNode.closestViewController.view.backgroundColor;
 
         YTDefaultSheetController *sheetController = [%c(YTDefaultSheetController) sheetControllerWithParentResponder:nil];
-        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Copy Comment Text" iconImage:nil style:0 handler:^{
+        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Copy Comment Text" iconImage:nil style:0 handler:^(YTActionSheetAction *action) {
             if (comment) [UIPasteboard generalPasteboard].string = comment;
         }]];
-        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Save Comment As Image" iconImage:nil style:0 handler:^{
+        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Save Comment As Image" iconImage:nil style:0 handler:^(YTActionSheetAction *action) {
             genImageFromLayer(layer, backgroundColor, ^(UIImage *image) {
                 UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil);
             });
