@@ -3,7 +3,6 @@
 #import <YouTubeHeader/YTSettingsSectionItemManager.h>
 #import <YouTubeHeader/YTSettingsViewController.h>
 #import <YouTubeHeader/YTSettingsGroupData.h>
-#import <YouTubeHeader/YTIIcon.h>
 
 static const NSInteger TweakSection = 789;
 
@@ -17,16 +16,14 @@ BOOL IsEnabled(NSString *key) {
 
 %hook YTSettingsGroupData
 - (NSArray <NSNumber *> *)orderedCategories {
-    // 1. If YouGroupSettings is installed, dynamically inject our ID into its whitelist array
     if (class_getClassMethod(objc_getClass("YTSettingsGroupData"), @selector(tweaks))) {
         NSMutableArray *tweaksArray = [%c(YTSettingsGroupData) performSelector:@selector(tweaks)];
         if (![tweaksArray containsObject:@(TweakSection)]) {
-            [tweaksArray insertObject:@(TweakSection) atIndex:0]; // Adds to the top of the Tweaks menu
+            [tweaksArray insertObject:@(TweakSection) atIndex:0]; 
         }
         return %orig;
     }
 
-    // 2. Fallback for when YouGroupSettings is NOT installed
     if (self.type != 1) return %orig;
     NSArray *categories = %orig;
     if ([categories containsObject:@(TweakSection)]) return categories;
@@ -79,15 +76,10 @@ BOOL IsEnabled(NSString *key) {
     }
     
     YTSettingsViewController *settingsViewController = [self valueForKey:@"_settingsViewControllerDelegate"];
-    
-    // Set the native YouTube "Tune/Sliders" icon
-    YTIIcon *icon = [%c(YTIIcon) new];
-    if ([icon respondsToSelector:@selector(setIconType:)]) {
-        icon.iconType = 211; 
-    }
 
     if ([settingsViewController respondsToSelector:@selector(setSectionItems:forCategory:title:icon:titleDescription:headerHidden:)]) {
-        [settingsViewController setSectionItems:sectionItems forCategory:TweakSection title:@"YtLite Custom" icon:icon titleDescription:nil headerHidden:NO];
+        // Passing 'nil' for the icon lets YouGroupSettings automatically apply a gear icon
+        [settingsViewController setSectionItems:sectionItems forCategory:TweakSection title:@"YtLite Custom" icon:nil titleDescription:nil headerHidden:NO];
     } else {
         [settingsViewController setSectionItems:sectionItems forCategory:TweakSection title:@"YtLite Custom" titleDescription:nil headerHidden:NO];
     }

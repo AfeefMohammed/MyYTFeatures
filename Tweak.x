@@ -86,27 +86,24 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
 %end
 
 
-// --- 2. HIDE CAST BUTTON (Gap Fix) ---
+// --- 2. HIDE CAST BUTTON ---
 %hook MDXPlaybackRouteButtonController
 - (BOOL)isPersistentCastIconEnabled { 
     return IsEnabled(@"noCast") ? NO : %orig;
 }
 
 - (void)updateRouteButton:(UIView *)btn { 
+    %orig; // Must call orig first to avoid initialization crashes
     if (IsEnabled(@"noCast")) {
         btn.hidden = YES;
         btn.alpha = 0.0;
-        btn.frame = CGRectZero;
         
-        // Force width constraints to 0 to collapse the StackView gap
         for (NSLayoutConstraint *constraint in btn.constraints) {
             if (constraint.firstAttribute == NSLayoutAttributeWidth || constraint.firstAttribute == NSLayoutAttributeHeight) {
                 constraint.constant = 0;
             }
         }
-        return;
     }
-    %orig;
 }
 
 - (void)updateAllRouteButtons { 
@@ -122,7 +119,6 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
 }
 %end
 
-// Hide from top navigation bar
 %hook YTRightNavigationButtons
 - (void)layoutSubviews {
     %orig;
@@ -130,14 +126,13 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
     for (UIView *subview in viewSelf.subviews) {
         if (IsEnabled(@"noCast") && [subview.accessibilityIdentifier isEqualToString:@"id.mdx.playbackroute.button"]) {
             subview.hidden = YES;
-            subview.frame = CGRectZero;
-            [subview removeFromSuperview];
+            // Removed 'removeFromSuperview' to prevent iteration crash
+            subview.frame = CGRectZero; 
         }
     }
 }
 %end
 
-// Hide from the video player overlay to remove the void gap
 %hook YTMainAppControlsOverlayView
 - (void)layoutSubviews {
     %orig;
@@ -147,7 +142,6 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
             if ([subview.accessibilityIdentifier isEqualToString:@"id.mdx.playbackroute.button"]) {
                 subview.hidden = YES;
                 subview.frame = CGRectZero;
-                [subview removeFromSuperview];
             }
         }
     }
