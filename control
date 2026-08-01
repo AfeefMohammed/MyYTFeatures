@@ -1,0 +1,9 @@
+Package: com.afeef.myytfeatures
+Name: MyYTFeatures
+Depends: mobilesubstrate
+Version: 1.0.0
+Architecture: iphoneos-arm
+Description: Extracted features from dyanch96 repo like show end time, hide cast button, hide create button, media managers, and tap to seek.
+Maintainer: Afeef Mohammed
+Author: Afeef Mohammed
+Section: Tweaks
