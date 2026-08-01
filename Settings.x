@@ -5,7 +5,6 @@
 #import <YouTubeHeader/YTSettingsGroupData.h>
 #import <YouTubeHeader/YTIIcon.h>
 
-// Use the exact section ID that YTLite uses to avoid array sorting conflicts
 static const NSInteger TweakSection = 789;
 
 BOOL IsEnabled(NSString *key) {
@@ -16,16 +15,31 @@ BOOL IsEnabled(NSString *key) {
 - (void)updateMyYTFeaturesSectionWithEntry:(id)entry;
 @end
 
-// Inject ONLY into the presentation data to prevent duplication
+%hook YTSettingsGroupData
+- (NSArray <NSNumber *> *)orderedCategories {
+    // This filter prevents the duplication bug by ensuring we only inject into the primary Tweaks group (Type 1)
+    if (self.type != 1 || class_getClassMethod(objc_getClass("YTSettingsGroupData"), @selector(tweaks))) {
+        return %orig;
+    }
+    NSArray *categories = %orig;
+    if ([categories containsObject:@(TweakSection)]) return categories;
+    NSMutableArray *mutableCategories = categories.mutableCopy;
+    [mutableCategories insertObject:@(TweakSection) atIndex:0];
+    return mutableCategories.copy;
+}
+%end
+
 %hook YTAppSettingsPresentationData
-+ (NSArray *)settingsCategoryOrder {
-    NSArray *order = %orig;
-    NSMutableArray *mutableOrder = [order mutableCopy];
++ (NSArray <NSNumber *> *)settingsCategoryOrder {
+    NSArray <NSNumber *> *order = %orig;
+    if ([order containsObject:@(TweakSection)]) return order;
     NSUInteger insertIndex = [order indexOfObject:@(1)];
     if (insertIndex != NSNotFound) {
+        NSMutableArray <NSNumber *> *mutableOrder = [order mutableCopy];
         [mutableOrder insertObject:@(TweakSection) atIndex:insertIndex + 1];
+        return mutableOrder.copy;
     }
-    return mutableOrder.copy;
+    return order;
 }
 %end
 
@@ -59,7 +73,7 @@ BOOL IsEnabled(NSString *key) {
     
     YTSettingsViewController *settingsViewController = [self valueForKey:@"_settingsViewControllerDelegate"];
     
-    // Attempting ID 211 for Sliders/Tune. (If it fails, change this to 255 for a Settings Gear)
+    // Icon ID 211 is the Sliders/Tune icon on newer YT versions
     YTIIcon *icon = [%c(YTIIcon) new];
     if ([icon respondsToSelector:@selector(setIconType:)]) {
         icon.iconType = 211; 
