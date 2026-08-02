@@ -20,14 +20,13 @@ extern BOOL IsEnabled(NSString *key);
 @property (nonatomic, strong, readwrite) NSString *endTimeString;
 @end
 
+// Store the playback speed globally so our math always has the real-time rate
+static float myyt_playbackRate = 1.0;
+
 void addEndTime(YTPlayerViewController *self, id video, id time) {
     if (!IsEnabled(@"videoEndTime")) return;
 
-    CGFloat rate = 1.0;
-    if ([video respondsToSelector:@selector(playbackRate)]) {
-        rate = [[video valueForKey:@"playbackRate"] floatValue];
-    }
-    if (rate == 0) rate = 1.0;
+    CGFloat rate = myyt_playbackRate > 0.0 ? myyt_playbackRate : 1.0;
     
     CGFloat totalMediaTime = 0.0;
     if ([video respondsToSelector:@selector(totalMediaTime)]) {
@@ -62,6 +61,12 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
 }
 
 %hook YTPlayerViewController
+// Hook the speed change so our end-time math is perfectly synced
+- (void)setPlaybackRate:(float)rate {
+    myyt_playbackRate = rate;
+    %orig;
+}
+
 - (void)singleVideo:(id)video currentVideoTimeDidChange:(id)time {
     %orig;
     addEndTime(self, video, time);
@@ -86,16 +91,11 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
 }
 %end
 
-
 // --- 2. MEDIA MANAGERS (Post, Comment) ---
 @interface ASDisplayNode : NSObject
 @property (nonatomic, assign, readonly) UIViewController *closestViewController;
 @property (atomic, assign, readonly) NSEnumerator *supernodes;
 @property (atomic) CALayer *layer;
-@end
-
-@interface ELMContainerNode : ASDisplayNode
-@property (nonatomic, strong, readwrite) NSString *copiedComment;
 @end
 
 @interface _ASDisplayView : UIView
@@ -134,28 +134,29 @@ static void addSafeActionToSheet(id sheet, NSString *title, void (^handler)(void
     }
 }
 
-%hook ELMContainerNode
-%property (nonatomic, strong) NSString *copiedComment;
-%end
-
-%hook ASDisplayNode
-- (void)setFrame:(CGRect)frame {
-    %orig;
-    if (IsEnabled(@"commentManager") && [[self valueForKey:@"_accessibilityIdentifier"] isEqualToString:@"id.comment.content.label"]) {
-        NSString *comment = nil;
-        if ([self respondsToSelector:@selector(attributedText)]) {
-            NSAttributedString *attrText = [self performSelector:@selector(attributedText)];
-            comment = attrText.string;
-        }
-        for (ELMContainerNode *containerNode in [[self performSelector:@selector(supernodes)] allObjects]) {
-            if ([containerNode.description containsString:@"id.ui.comment_cell"] && comment) {
-                containerNode.copiedComment = comment;
-                break;
+// Fast recursive text extractor to grab comments without relying on fragile YouTube IDs
+static NSString *extractTextFromNode(id node) {
+    NSMutableString *result = [NSMutableString string];
+    if ([node respondsToSelector:@selector(attributedText)]) {
+        NSAttributedString *attr = [node performSelector:@selector(attributedText)];
+        if (attr.string) [result appendString:attr.string];
+    } else if ([node respondsToSelector:@selector(text)]) {
+        NSString *text = [node performSelector:@selector(text)];
+        if (text) [result appendString:text];
+    }
+    
+    if ([node respondsToSelector:@selector(subnodes)]) {
+        NSArray *subnodes = [node performSelector:@selector(subnodes)];
+        for (id subnode in subnodes) {
+            NSString *subText = extractTextFromNode(subnode);
+            if (subText.length > 0) {
+                if (result.length > 0) [result appendString:@" "];
+                [result appendString:subText];
             }
         }
     }
+    return result.copy;
 }
-%end
 
 %hook _ASDisplayView
 - (void)setKeepalive_node:(id)arg1 {
@@ -179,15 +180,15 @@ static void addSafeActionToSheet(id sheet, NSString *title, void (^handler)(void
 %new
 - (void)postManager:(UILongPressGestureRecognizer *)sender {
     if (sender.state == UIGestureRecognizerStateBegan) {
-        ELMContainerNode *containerNode = (ELMContainerNode *)self.keepalive_node;
-        NSString *text = containerNode.copiedComment;
+        ASDisplayNode *node = self.keepalive_node;
+        NSString *text = extractTextFromNode(node);
         CALayer *layer = self.layer;
-        UIColor *backgroundColor = containerNode.closestViewController.view.backgroundColor;
+        UIColor *backgroundColor = node.closestViewController.view.backgroundColor;
 
         id sheetController = [%c(YTDefaultSheetController) sheetControllerWithParentResponder:nil];
         
         addSafeActionToSheet(sheetController, @"Copy Post Text", ^{
-            if (text) [UIPasteboard generalPasteboard].string = text;
+            if (text.length > 0) [UIPasteboard generalPasteboard].string = text;
         });
         
         addSafeActionToSheet(sheetController, @"Save Post As Image", ^{
@@ -196,22 +197,22 @@ static void addSafeActionToSheet(id sheet, NSString *title, void (^handler)(void
             });
         });
 
-        [sheetController presentFromViewController:containerNode.closestViewController animated:YES completion:nil];
+        [sheetController presentFromViewController:node.closestViewController animated:YES completion:nil];
     }
 }
 
 %new
 - (void)commentManager:(UILongPressGestureRecognizer *)sender {
     if (sender.state == UIGestureRecognizerStateBegan) {
-        ELMContainerNode *containerNode = (ELMContainerNode *)self.keepalive_node;
-        NSString *comment = containerNode.copiedComment;
+        ASDisplayNode *node = self.keepalive_node;
+        NSString *comment = extractTextFromNode(node);
         CALayer *layer = self.layer;
-        UIColor *backgroundColor = containerNode.closestViewController.view.backgroundColor;
+        UIColor *backgroundColor = node.closestViewController.view.backgroundColor;
 
         id sheetController = [%c(YTDefaultSheetController) sheetControllerWithParentResponder:nil];
         
         addSafeActionToSheet(sheetController, @"Copy Comment Text", ^{
-            if (comment) [UIPasteboard generalPasteboard].string = comment;
+            if (comment.length > 0) [UIPasteboard generalPasteboard].string = comment;
         });
         
         addSafeActionToSheet(sheetController, @"Save Comment As Image", ^{
@@ -220,7 +221,7 @@ static void addSafeActionToSheet(id sheet, NSString *title, void (^handler)(void
             });
         });
 
-        [sheetController presentFromViewController:containerNode.closestViewController animated:YES completion:nil];
+        [sheetController presentFromViewController:node.closestViewController animated:YES completion:nil];
     }
 }
 %end
