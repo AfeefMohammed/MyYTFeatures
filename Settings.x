@@ -25,11 +25,14 @@ BOOL IsEnabled(NSString *key) {
     // Check type to prevent duplication across different setting sections
     if (self.type != 1) return %orig;
     
-    NSMutableArray *mutableCategories = %orig.mutableCopy;
+    // FIX: Assign to a standard NSArray first, then use bracket syntax to safely mutate
+    NSArray *categories = %orig;
+    NSMutableArray *mutableCategories = [categories mutableCopy];
+    
     if (![mutableCategories containsObject:@(TweakSection)]) {
         [mutableCategories insertObject:@(TweakSection) atIndex:0];
     }
-    return mutableCategories.copy;
+    return [mutableCategories copy];
 }
 %end
 
@@ -42,7 +45,7 @@ BOOL IsEnabled(NSString *key) {
     if (insertIndex != NSNotFound) {
         NSMutableArray <NSNumber *> *mutableOrder = [order mutableCopy];
         [mutableOrder insertObject:@(TweakSection) atIndex:insertIndex + 1];
-        return mutableOrder.copy;
+        return [mutableOrder copy];
     }
     return order;
 }
@@ -76,7 +79,6 @@ BOOL IsEnabled(NSString *key) {
     
     YTSettingsViewController *settingsViewController = [self valueForKey:@"_settingsViewControllerDelegate"];
     
-    // Safely apply the native Tune/Sliders icon we found in YouMod
     YTIIcon *icon = [%c(YTIIcon) new];
     if ([icon respondsToSelector:@selector(setIconType:)]) {
         icon.iconType = YT_TUNE; 
