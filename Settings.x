@@ -17,19 +17,18 @@ BOOL IsEnabled(NSString *key) {
 
 %hook YTSettingsGroupData
 - (NSArray <NSNumber *> *)orderedCategories {
+    // Inject if YouGroupSettings is present, otherwise fallback to standard filter
     if (class_getClassMethod(objc_getClass("YTSettingsGroupData"), @selector(tweaks))) {
-        NSMutableArray *tweaksArray = [%c(YTSettingsGroupData) performSelector:@selector(tweaks)];
-        if (![tweaksArray containsObject:@(TweakSection)]) {
-            [tweaksArray insertObject:@(TweakSection) atIndex:0]; 
-        }
         return %orig;
     }
-
+    
+    // Check type to prevent duplication across different setting sections
     if (self.type != 1) return %orig;
-    NSArray *categories = %orig;
-    if ([categories containsObject:@(TweakSection)]) return categories;
-    NSMutableArray *mutableCategories = categories.mutableCopy;
-    [mutableCategories insertObject:@(TweakSection) atIndex:0];
+    
+    NSMutableArray *mutableCategories = %orig.mutableCopy;
+    if (![mutableCategories containsObject:@(TweakSection)]) {
+        [mutableCategories insertObject:@(TweakSection) atIndex:0];
+    }
     return mutableCategories.copy;
 }
 %end
@@ -38,6 +37,7 @@ BOOL IsEnabled(NSString *key) {
 + (NSArray <NSNumber *> *)settingsCategoryOrder {
     NSArray <NSNumber *> *order = %orig;
     if ([order containsObject:@(TweakSection)]) return order;
+    
     NSUInteger insertIndex = [order indexOfObject:@(1)];
     if (insertIndex != NSNotFound) {
         NSMutableArray <NSNumber *> *mutableOrder = [order mutableCopy];
@@ -75,9 +75,15 @@ BOOL IsEnabled(NSString *key) {
     }
     
     YTSettingsViewController *settingsViewController = [self valueForKey:@"_settingsViewControllerDelegate"];
+    
+    // Safely apply the native Tune/Sliders icon we found in YouMod
+    YTIIcon *icon = [%c(YTIIcon) new];
+    if ([icon respondsToSelector:@selector(setIconType:)]) {
+        icon.iconType = YT_TUNE; 
+    }
 
     if ([settingsViewController respondsToSelector:@selector(setSectionItems:forCategory:title:icon:titleDescription:headerHidden:)]) {
-        [settingsViewController setSectionItems:sectionItems forCategory:TweakSection title:@"YtLite Custom" icon:nil titleDescription:nil headerHidden:NO];
+        [settingsViewController setSectionItems:sectionItems forCategory:TweakSection title:@"YtLite Custom" icon:icon titleDescription:nil headerHidden:NO];
     } else {
         [settingsViewController setSectionItems:sectionItems forCategory:TweakSection title:@"YtLite Custom" titleDescription:nil headerHidden:NO];
     }
