@@ -86,70 +86,8 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
 }
 %end
 
-// --- 2. HIDE CAST BUTTON (Safe Method) ---
-%hook MDXPlaybackRouteButtonController
-- (BOOL)isPersistentCastIconEnabled { 
-    return IsEnabled(@"noCast") ? NO : %orig;
-}
-%end
 
-%hook YTSettings
-- (void)setDisableMDXDeviceDiscovery:(BOOL)arg1 {
-    %orig(IsEnabled(@"noCast") ? YES : arg1);
-}
-%end
-
-%hook YTRightNavigationButtons
-- (void)layoutSubviews {
-    %orig;
-    if (IsEnabled(@"noCast")) {
-        UIView *viewSelf = (UIView *)self;
-        for (UIView *subview in viewSelf.subviews) {
-            if ([subview.accessibilityIdentifier isEqualToString:@"id.mdx.playbackroute.button"]) {
-                subview.hidden = YES;
-            }
-        }
-    }
-}
-%end
-
-@interface YTMainAppVideoPlayerOverlayView (MyYTCast)
-@property (nonatomic, strong) UIView *playbackRouteButton;
-@end
-
-%hook YTMainAppVideoPlayerOverlayView
-- (void)layoutSubviews {
-    %orig;
-    if (IsEnabled(@"noCast")) {
-        if ([self respondsToSelector:@selector(playbackRouteButton)]) {
-            self.playbackRouteButton.hidden = YES;
-        }
-    }
-}
-%end
-
-// --- 3. HIDE CREATE BUTTON ---
-%hook YTPivotBarView
-- (void)setRenderer:(id)renderer {
-    if (IsEnabled(@"removeUploads")) {
-        NSMutableArray *items = [renderer performSelector:@selector(itemsArray)];
-        NSMutableIndexSet *indicesToRemove = [NSMutableIndexSet indexSet];
-        
-        for (NSUInteger i = 0; i < items.count; i++) {
-            id item = items[i];
-            id iconOnlyRenderer = [item respondsToSelector:@selector(pivotBarIconOnlyItemRenderer)] ? [item performSelector:@selector(pivotBarIconOnlyItemRenderer)] : nil;
-            NSString *pivotIdentifier = [iconOnlyRenderer respondsToSelector:@selector(pivotIdentifier)] ? [iconOnlyRenderer performSelector:@selector(pivotIdentifier)] : nil;
-            if ([pivotIdentifier isEqualToString:@"FEuploads"]) {
-                [indicesToRemove addIndex:i];
-            }
-        }
-        [items removeObjectsAtIndexes:indicesToRemove];
-    }
-    %orig(renderer);
-}
-%end
-
-// --- 4. MEDIA MANAGERS (Post, Comment) ---
+// --- 2. MEDIA MANAGERS (Post, Comment) ---
 @interface ASDisplayNode : NSObject
 @property (nonatomic, assign, readonly) UIViewController *closestViewController;
 @property (atomic, assign, readonly) NSEnumerator *supernodes;
