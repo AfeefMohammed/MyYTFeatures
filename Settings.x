@@ -17,15 +17,19 @@ BOOL IsEnabled(NSString *key) {
 
 %hook YTSettingsGroupData
 - (NSArray <NSNumber *> *)orderedCategories {
-    // Inject if YouGroupSettings is present, otherwise fallback to standard filter
+    // 1. If YouGroupSettings is present, safely inject our ID into its whitelist array
     if (class_getClassMethod(objc_getClass("YTSettingsGroupData"), @selector(tweaks))) {
+        NSMutableArray *tweaksArray = [%c(YTSettingsGroupData) performSelector:@selector(tweaks)];
+        if (![tweaksArray containsObject:@(TweakSection)]) {
+            [tweaksArray insertObject:@(TweakSection) atIndex:0]; 
+        }
         return %orig;
     }
-    
-    // Check type to prevent duplication across different setting sections
+
+    // 2. Check type to prevent duplication across different setting sections
     if (self.type != 1) return %orig;
     
-    // FIX: Assign to a standard NSArray first, then use bracket syntax to safely mutate
+    // 3. Fallback for when YouGroupSettings is NOT installed (with compiler error fix)
     NSArray *categories = %orig;
     NSMutableArray *mutableCategories = [categories mutableCopy];
     
