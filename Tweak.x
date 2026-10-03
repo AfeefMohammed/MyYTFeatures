@@ -21,12 +21,13 @@ extern BOOL IsEnabled(NSString *key);
 - (CGFloat)scrubRangeForScrubX:(CGFloat)arg1;
 @end
 
-@interface YTMainAppVideoPlayerOverlayViewController (MyYT)
+// FIX 1: Explicitly declare the base class as UIViewController instead of a category
+@interface YTMainAppVideoPlayerOverlayViewController : UIViewController
 - (CGFloat)totalTime;
 @end
 
 @interface YTPlayerViewController (MyYT)
-- (void)seekToTime:(double)time;
+- (void)seekToTime:(CGFloat)time;
 @end
 
 // --- 1. SHOW END TIME ---
@@ -108,7 +109,8 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
     id mainAppController = [self.delegate valueForKey:@"_delegate"];
     if (mainAppController == nil) return;
 
-    id playerViewController = [mainAppController valueForKey:@"parentViewController"];
+    // FIX 2: Explicitly typecast the player view controller
+    YTPlayerViewController *playerViewController = [mainAppController valueForKey:@"parentViewController"];
 
     if ([arg1 isKindOfClass:[UIGestureRecognizer class]]) {
         UIGestureRecognizer *gestureRecognizer = (UIGestureRecognizer *)arg1;
