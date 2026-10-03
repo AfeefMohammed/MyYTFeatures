@@ -61,7 +61,8 @@ BOOL IsEnabled(NSString *key) {
     NSArray *tweakKeys = @[
         @{@"key": @"videoEndTime", @"title": @"Show End Time"},
         @{@"key": @"postManager", @"title": @"Post Manager"},
-        @{@"key": @"commentManager", @"title": @"Comment Manager"}
+        @{@"key": @"commentManager", @"title": @"Comment Manager"},
+        @{@"key": @"tapToSeek", @"title": @"Enable Tap To Seek"}
     ];
     
     for (NSDictionary *dict in tweakKeys) {

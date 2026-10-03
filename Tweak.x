@@ -15,12 +15,21 @@ extern BOOL IsEnabled(NSString *key);
 - (void)addAction:(id)action;
 @end
 
-// --- 1. SHOW END TIME ---
 @interface YTInlinePlayerBarContainerView (MyYT)
+@property (nonatomic, weak, readwrite) id delegate;
 @property (nonatomic, strong, readwrite) NSString *endTimeString;
+- (CGFloat)scrubRangeForScrubX:(CGFloat)arg1;
 @end
 
-// Store the playback speed globally so our math always has the real-time rate
+@interface YTMainAppVideoPlayerOverlayViewController (MyYT)
+- (CGFloat)totalTime;
+@end
+
+@interface YTPlayerViewController (MyYT)
+- (void)seekToTime:(double)time;
+@end
+
+// --- 1. SHOW END TIME ---
 static float myyt_playbackRate = 1.0;
 
 void addEndTime(YTPlayerViewController *self, id video, id time) {
@@ -61,7 +70,6 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
 }
 
 %hook YTPlayerViewController
-// Hook the speed change so our end-time math is perfectly synced
 - (void)setPlaybackRate:(float)rate {
     myyt_playbackRate = rate;
     %orig;
@@ -71,6 +79,7 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
     %orig;
     addEndTime(self, video, time);
 }
+
 - (void)potentiallyMutatedSingleVideo:(id)video currentVideoTimeDidChange:(id)time {
     %orig;
     addEndTime(self, video, time);
@@ -79,6 +88,7 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
 
 %hook YTInlinePlayerBarContainerView
 %property (nonatomic, strong) NSString *endTimeString;
+
 - (void)setPeekableViewVisible:(BOOL)visible {
     %orig;
     if (!IsEnabled(@"videoEndTime")) return;
@@ -89,9 +99,35 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
         [durationLabel sizeToFit];
     }
 }
+
+// --- 2. TAP TO SEEK ---
+- (void)didPressScrubber:(id)arg1 {
+    %orig;
+    if (!IsEnabled(@"tapToSeek")) return;
+
+    id mainAppController = [self.delegate valueForKey:@"_delegate"];
+    if (mainAppController == nil) return;
+
+    id playerViewController = [mainAppController valueForKey:@"parentViewController"];
+
+    if ([arg1 isKindOfClass:[UIGestureRecognizer class]]) {
+        UIGestureRecognizer *gestureRecognizer = (UIGestureRecognizer *)arg1;
+        CGPoint location = [gestureRecognizer locationInView:self];
+        CGFloat x = location.x;
+
+        if ([self respondsToSelector:@selector(scrubRangeForScrubX:)] &&
+            [mainAppController respondsToSelector:@selector(totalTime)] &&
+            [playerViewController respondsToSelector:@selector(seekToTime:)]) {
+            
+            double timestampFraction = [self scrubRangeForScrubX:x];
+            double timestamp = [mainAppController totalTime] * timestampFraction;
+            [playerViewController seekToTime:timestamp];
+        }
+    }
+}
 %end
 
-// --- 2. MEDIA MANAGERS (Post, Comment) ---
+// --- 3. MEDIA MANAGERS (Post, Comment) ---
 @interface ASDisplayNode : NSObject
 @property (nonatomic, assign, readonly) UIViewController *closestViewController;
 @property (atomic, assign, readonly) NSEnumerator *supernodes;
@@ -134,7 +170,6 @@ static void addSafeActionToSheet(id sheet, NSString *title, void (^handler)(void
     }
 }
 
-// Fast recursive text extractor to grab comments without relying on fragile YouTube IDs
 static NSString *extractTextFromNode(id node) {
     NSMutableString *result = [NSMutableString string];
     if ([node respondsToSelector:@selector(attributedText)]) {
