@@ -17,7 +17,6 @@ extern BOOL IsEnabled(NSString *key);
 
 @interface YTInlinePlayerBarContainerView (MyYT)
 @property (nonatomic, weak, readwrite) id delegate;
-@property (nonatomic, strong, readwrite) NSString *endTimeString;
 - (CGFloat)scrubRangeForScrubX:(CGFloat)arg1;
 @end
 
@@ -30,22 +29,23 @@ extern BOOL IsEnabled(NSString *key);
 - (void)seekToTime:(CGFloat)time;
 @end
 
-// --- 1. SHOW END TIME ---
+// --- 1. SHOW END TIME (UI-Agnostic Interceptor) ---
 static float myyt_playbackRate = 1.0;
+static NSString *myyt_globalEndTime = nil;
 
-void addEndTime(YTPlayerViewController *self, id video, id time) {
-    if (!IsEnabled(@"videoEndTime")) return;
+static void updateGlobalEndTime(id video, id time) {
+    if (!IsEnabled(@"videoEndTime")) {
+        myyt_globalEndTime = nil;
+        return;
+    }
 
     CGFloat rate = myyt_playbackRate > 0.0 ? myyt_playbackRate : 1.0;
-    
-    CGFloat totalMediaTime = 0.0;
-    if ([video respondsToSelector:@selector(totalMediaTime)]) {
-        totalMediaTime = [[video valueForKey:@"totalMediaTime"] floatValue];
-    }
-    
-    CGFloat currentTime = 0.0;
-    if ([time respondsToSelector:@selector(time)]) {
-        currentTime = [[time valueForKey:@"time"] floatValue];
+    CGFloat totalMediaTime = [video respondsToSelector:@selector(totalMediaTime)] ? [[video valueForKey:@"totalMediaTime"] floatValue] : 0.0;
+    CGFloat currentTime = [time respondsToSelector:@selector(time)] ? [[time valueForKey:@"time"] floatValue] : 0.0;
+
+    if (totalMediaTime <= 0) {
+        myyt_globalEndTime = nil;
+        return;
     }
 
     NSTimeInterval remainingTime = (lround(totalMediaTime) - lround(currentTime)) / rate;
@@ -55,19 +55,7 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
     [dateFormatter setLocale:[[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"]];
     [dateFormatter setDateFormat:@"h:mm a"];
 
-    NSString *formattedEndTime = [dateFormatter stringFromDate:estimatedEndTime];
-
-    UIView *playerView = self.view;
-    YTMainAppVideoPlayerOverlayView *overlay = (YTMainAppVideoPlayerOverlayView *)[playerView valueForKey:@"_overlayView"];
-    if (![overlay isKindOfClass:%c(YTMainAppVideoPlayerOverlayView)]) return;
-
-    UILabel *durationLabel = [overlay.playerBar valueForKey:@"durationLabel"];
-    overlay.playerBar.endTimeString = formattedEndTime;
-
-    if (![durationLabel.text containsString:formattedEndTime]) {
-        durationLabel.text = [durationLabel.text stringByAppendingString:[NSString stringWithFormat:@" • %@", formattedEndTime]];
-        [durationLabel sizeToFit];
-    }
+    myyt_globalEndTime = [dateFormatter stringFromDate:estimatedEndTime];
 }
 
 %hook YTPlayerViewController
@@ -78,30 +66,65 @@ void addEndTime(YTPlayerViewController *self, id video, id time) {
 
 - (void)singleVideo:(id)video currentVideoTimeDidChange:(id)time {
     %orig;
-    addEndTime(self, video, time);
+    updateGlobalEndTime(video, time);
 }
 
 - (void)potentiallyMutatedSingleVideo:(id)video currentVideoTimeDidChange:(id)time {
     %orig;
-    addEndTime(self, video, time);
+    updateGlobalEndTime(video, time);
 }
 %end
 
-%hook YTInlinePlayerBarContainerView
-%property (nonatomic, strong) NSString *endTimeString;
-
-- (void)setPeekableViewVisible:(BOOL)visible {
-    %orig;
-    if (!IsEnabled(@"videoEndTime")) return;
-    
-    UILabel *durationLabel = [self valueForKey:@"durationLabel"];
-    if (self.endTimeString && ![durationLabel.text containsString:self.endTimeString]) {
-        durationLabel.text = [durationLabel.text stringByAppendingString:[NSString stringWithFormat:@" • %@", self.endTimeString]];
-        [durationLabel sizeToFit];
+// Helper to intercept and modify the time string right before it is drawn
+static NSString *interceptTimeText(NSString *text) {
+    if (!IsEnabled(@"videoEndTime") || !text || !myyt_globalEndTime) return text;
+    // Identify the time string (e.g. "-13:51 / 22:34")
+    if (text.length < 30 && [text containsString:@"/"] && [text containsString:@":"]) {
+        if (![text containsString:myyt_globalEndTime]) {
+            return [text stringByAppendingFormat:@" • %@", myyt_globalEndTime];
+        }
     }
+    return text;
 }
 
+static NSAttributedString *interceptTimeAttributedText(NSAttributedString *attributedText) {
+    if (!IsEnabled(@"videoEndTime") || !attributedText || !myyt_globalEndTime) return attributedText;
+    NSString *text = attributedText.string;
+    // Identify the time string (e.g. "-13:51 / 22:34")
+    if (text.length < 30 && [text containsString:@"/"] && [text containsString:@":"]) {
+        if (![text containsString:myyt_globalEndTime]) {
+            NSMutableAttributedString *newAttr = [attributedText mutableCopy];
+            NSDictionary *attrs = [attributedText length] > 0 ? [attributedText attributesAtIndex:attributedText.length - 1 effectiveRange:NULL] : nil;
+            NSAttributedString *appendAttr = [[NSAttributedString alloc] initWithString:[NSString stringWithFormat:@" • %@", myyt_globalEndTime] attributes:attrs];
+            [newAttr appendAttributedString:appendAttr];
+            return newAttr;
+        }
+    }
+    return attributedText;
+}
+
+// Hook all Standard Labels
+%hook UILabel
+- (void)setText:(NSString *)text {
+    %orig(interceptTimeText(text));
+}
+- (void)setAttributedText:(NSAttributedString *)attributedText {
+    %orig(interceptTimeAttributedText(attributedText));
+}
+%end
+
+// Hook YouTube's Custom Labels
+%hook YTLabel
+- (void)setText:(NSString *)text {
+    %orig(interceptTimeText(text));
+}
+- (void)setAttributedText:(NSAttributedString *)attributedText {
+    %orig(interceptTimeAttributedText(attributedText));
+}
+%end
+
 // --- 2. TAP TO SEEK ---
+%hook YTInlinePlayerBarContainerView
 - (void)didPressScrubber:(id)arg1 {
     %orig;
     if (!IsEnabled(@"tapToSeek")) return;
