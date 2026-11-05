@@ -1,19 +1,17 @@
-#import <UIKit/UIKit.h>
-#import <YouTubeHeader/YTSettingsSectionItem.h>
-#import <YouTubeHeader/YTSettingsSectionItemManager.h>
-#import <YouTubeHeader/YTSettingsViewController.h>
-#import <YouTubeHeader/YTSettingsGroupData.h>
-#import <YouTubeHeader/YTIIcon.h>
+#import "Headers.h"
 
 static const NSInteger TweakSection = 789;
+#define TweakName @"YtLite Custom"
 
-BOOL IsEnabled(NSString *key) {
-    return [[NSUserDefaults standardUserDefaults] boolForKey:key];
-}
+#define kPostManager @"postManager"
+#define kCommentManager @"commentManager"
+#define kTapToSeek @"tapToSeek"
+#define kVideoEndTime @"videoEndTime"
 
-@interface YTSettingsSectionItemManager (MyYTFeatures)
-- (void)updateMyYTFeaturesSectionWithEntry:(id)entry;
-@end
+// YouTube icon types (same ones YouMod uses)
+#define kIconTune 530      // YT_TUNE  – entry in the Tweaks list
+#define kIconDownload 57   // Downloading
+#define kIconPlayer 658    // Player
 
 %hook YTSettingsGroupData
 - (NSArray <NSNumber *> *)orderedCategories {
@@ -24,12 +22,10 @@ BOOL IsEnabled(NSString *key) {
         }
         return %orig;
     }
-
     if (self.type != 1) return %orig;
     
     NSArray *categories = %orig;
     NSMutableArray *mutableCategories = [categories mutableCopy];
-    
     if (![mutableCategories containsObject:@(TweakSection)]) {
         [mutableCategories insertObject:@(TweakSection) atIndex:0];
     }
@@ -54,50 +50,80 @@ BOOL IsEnabled(NSString *key) {
 
 %hook YTSettingsSectionItemManager
 %new
-- (void)updateMyYTFeaturesSectionWithEntry:(id)entry {
+- (void)updateYtLiteCustomSectionWithEntry:(id)entry {
     NSMutableArray *sectionItems = [NSMutableArray array];
-    Class YTSettingsSectionItemClass = %c(YTSettingsSectionItem);
-    
-    NSArray *tweakKeys = @[
-        @{@"key": @"videoEndTime", @"title": @"Show End Time"},
-        @{@"key": @"postManager", @"title": @"Post Manager"},
-        @{@"key": @"commentManager", @"title": @"Comment Manager"},
-        @{@"key": @"tapToSeek", @"title": @"Enable Tap To Seek"}
+    Class itemClass = %c(YTSettingsSectionItem);
+    id settingsViewController = [self valueForKey:@"_settingsViewControllerDelegate"];
+
+    // ---------- Downloading ----------
+    NSArray *downloadItems = @[
+        YTLCToggle(@"Save post information",
+                   @"Allows to copy post text and save post as image by long tap.",
+                   kPostManager),
+        YTLCToggle(@"Save comment information",
+                   @"Allows to copy comment text and save comment as image by long tap on the three dots button.",
+                   kCommentManager),
     ];
-    
-    for (NSDictionary *dict in tweakKeys) {
-        NSString *key = dict[@"key"];
-        YTSettingsSectionItem *item = [YTSettingsSectionItemClass switchItemWithTitle:dict[@"title"]
-            titleDescription:nil
-            accessibilityIdentifier:nil
-            switchOn:IsEnabled(key)
-            switchBlock:^BOOL (id cell, BOOL enabled) {
-                [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:key];
-                return YES;
-            }
-            settingItemId:0];
-        [sectionItems addObject:item];
-    }
-    
-    YTSettingsViewController *settingsViewController = [self valueForKey:@"_settingsViewControllerDelegate"];
-    
-    YTIIcon *icon = [%c(YTIIcon) new];
-    if ([icon respondsToSelector:@selector(setIconType:)]) {
-        icon.iconType = YT_TUNE; 
-    }
+    YTSettingsSectionItem *downloadGroup = [itemClass itemWithTitle:@"Downloading"
+        accessibilityIdentifier:nil
+        detailTextBlock:nil
+        selectBlock:^BOOL (id cell, NSUInteger arg1) {
+            YTLCPushSubSettings(@"Downloading", downloadItems, settingsViewController, [self parentResponder]);
+            return YES;
+        }];
+    YTIIcon *downloadIcon = [%c(YTIIcon) new];
+    downloadIcon.iconType = kIconDownload;
+    downloadGroup.settingIcon = downloadIcon;
+    [sectionItems addObject:downloadGroup];
+
+    // ---------- Player ----------
+    NSArray *playerItems = @[
+        YTLCToggle(@"Show end time",
+                   @"Adds the estimated finish time to the label in the video overlay.",
+                   kVideoEndTime),
+        YTLCToggle(@"Tap to seek",
+                   @"Quickly jump to any point by tapping the progress bar.",
+                   kTapToSeek),
+    ];
+    YTSettingsSectionItem *playerGroup = [itemClass itemWithTitle:@"Player"
+        accessibilityIdentifier:nil
+        detailTextBlock:nil
+        selectBlock:^BOOL (id cell, NSUInteger arg1) {
+            YTLCPushSubSettings(@"Player", playerItems, settingsViewController, [self parentResponder]);
+            return YES;
+        }];
+    YTIIcon *playerIcon = [%c(YTIIcon) new];
+    playerIcon.iconType = kIconPlayer;
+    playerGroup.settingIcon = playerIcon;
+    [sectionItems addObject:playerGroup];
+
+    // ---------- Entry in YouTube's Tweaks list (tune icon) ----------
+    YTIIcon *tuneIcon = [%c(YTIIcon) new];
+    tuneIcon.iconType = kIconTune;
 
     if ([settingsViewController respondsToSelector:@selector(setSectionItems:forCategory:title:icon:titleDescription:headerHidden:)]) {
-        [settingsViewController setSectionItems:sectionItems forCategory:TweakSection title:@"YtLite Custom" icon:icon titleDescription:nil headerHidden:NO];
-    } else {
-        [settingsViewController setSectionItems:sectionItems forCategory:TweakSection title:@"YtLite Custom" titleDescription:nil headerHidden:NO];
+        [settingsViewController setSectionItems:sectionItems forCategory:TweakSection title:TweakName icon:tuneIcon titleDescription:nil headerHidden:NO];
+    } else if ([settingsViewController respondsToSelector:@selector(setSectionItems:forCategory:title:titleDescription:headerHidden:)]) {
+        [settingsViewController setSectionItems:sectionItems forCategory:TweakSection title:TweakName titleDescription:nil headerHidden:NO];
     }
 }
 
 - (void)updateSectionForCategory:(NSUInteger)category withEntry:(id)entry {
     if (category == TweakSection) {
-        [self updateMyYTFeaturesSectionWithEntry:entry];
+        [self updateYtLiteCustomSectionWithEntry:entry];
         return;
     }
     %orig;
 }
 %end
+
+%ctor {
+    NSDictionary *defaults = @{
+        kPostManager: @YES,
+        kCommentManager: @YES,
+        kVideoEndTime: @NO,
+        kTapToSeek: @YES
+    };
+    [[NSUserDefaults standardUserDefaults] registerDefaults:defaults];
+    %init;
+}

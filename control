@@ -1,9 +1,9 @@
-Package: com.afeef.myytfeatures
-Name: MyYTFeatures
+Package: com.afeef.ytlitecustom
+Name: YtLite Custom
 Depends: mobilesubstrate
 Version: 1.0.0
 Architecture: iphoneos-arm
-Description: Extracted features from dyanch96 repo like show end time, hide cast button, hide create button, media managers, and tap to seek.
+Description: Feature-rich YouTube tweaks including Tap to Seek, Show Video End Time, Post and Comment Managers with Google Translate integration and Pill Toast notifications.
 Maintainer: Afeef Mohammed
 Author: Afeef Mohammed
 Section: Tweaks

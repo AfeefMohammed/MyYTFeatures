@@ -1,175 +1,33 @@
-#import <UIKit/UIKit.h>
-#import <Photos/Photos.h>
-#import <objc/message.h>
-#import <objc/runtime.h>
-#import <YouTubeHeader/YTPlayerViewController.h>
-#import <YouTubeHeader/YTInlinePlayerBarContainerView.h>
-#import <YouTubeHeader/YTMainAppVideoPlayerOverlayView.h>
-#import <YouTubeHeader/YTDefaultSheetController.h>
+#import "Headers.h"
 
-extern BOOL IsEnabled(NSString *key);
-
-@interface YTDefaultSheetController (MyYT)
-+ (instancetype)sheetControllerWithParentResponder:(id)responder;
-- (void)presentFromViewController:(id)vc animated:(BOOL)animated completion:(void(^)(void))completion;
-- (void)addAction:(id)action;
+// --- COMPILER FIX ---
+@interface YTIIcon (CompilerFix)
+- (UIImage *)iconImageWithColor:(UIColor *)color;
 @end
+// --------------------
 
-@interface YTInlinePlayerBarContainerView (MyYT)
-@property (nonatomic, weak, readwrite) id delegate;
-- (CGFloat)scrubRangeForScrubX:(CGFloat)arg1;
-@end
+#define IsEnabled(key) [[NSUserDefaults standardUserDefaults] boolForKey:key]
 
-// FIX 1: Explicitly declare the base class as UIViewController instead of a category
-@interface YTMainAppVideoPlayerOverlayViewController : UIViewController
-- (CGFloat)totalTime;
-@end
-
-@interface YTPlayerViewController (MyYT)
-- (void)seekToTime:(CGFloat)time;
-@end
-
-// --- 1. SHOW END TIME (UI-Agnostic Interceptor) ---
-static float myyt_playbackRate = 1.0;
-static NSString *myyt_globalEndTime = nil;
-
-static void updateGlobalEndTime(id video, id time) {
-    if (!IsEnabled(@"videoEndTime")) {
-        myyt_globalEndTime = nil;
-        return;
-    }
-
-    CGFloat rate = myyt_playbackRate > 0.0 ? myyt_playbackRate : 1.0;
-    CGFloat totalMediaTime = [video respondsToSelector:@selector(totalMediaTime)] ? [[video valueForKey:@"totalMediaTime"] floatValue] : 0.0;
-    CGFloat currentTime = [time respondsToSelector:@selector(time)] ? [[time valueForKey:@"time"] floatValue] : 0.0;
-
-    if (totalMediaTime <= 0) {
-        myyt_globalEndTime = nil;
-        return;
-    }
-
-    NSTimeInterval remainingTime = (lround(totalMediaTime) - lround(currentTime)) / rate;
-    NSDate *estimatedEndTime = [NSDate dateWithTimeIntervalSinceNow:remainingTime];
-
-    NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
-    [dateFormatter setLocale:[[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"]];
-    [dateFormatter setDateFormat:@"h:mm a"];
-
-    myyt_globalEndTime = [dateFormatter stringFromDate:estimatedEndTime];
-}
-
-%hook YTPlayerViewController
-- (void)setPlaybackRate:(float)rate {
-    myyt_playbackRate = rate;
-    %orig;
-}
-
-- (void)singleVideo:(id)video currentVideoTimeDidChange:(id)time {
-    %orig;
-    updateGlobalEndTime(video, time);
-}
-
-- (void)potentiallyMutatedSingleVideo:(id)video currentVideoTimeDidChange:(id)time {
-    %orig;
-    updateGlobalEndTime(video, time);
-}
-%end
-
-// Helper to intercept and modify the time string right before it is drawn
-static NSString *interceptTimeText(NSString *text) {
-    if (!IsEnabled(@"videoEndTime") || !text || !myyt_globalEndTime) return text;
-    // Identify the time string (e.g. "-13:51 / 22:34")
-    if (text.length < 30 && [text containsString:@"/"] && [text containsString:@":"]) {
-        if (![text containsString:myyt_globalEndTime]) {
-            return [text stringByAppendingFormat:@" • %@", myyt_globalEndTime];
+// 1. The Integer-Based Icon Generator
+static UIImage *GetImageForYTInteger(int iconId) {
+    YTIIcon *icon = [%c(YTIIcon) new];
+    if ([icon respondsToSelector:@selector(setIconType:)]) {
+        icon.iconType = iconId;
+        if ([icon respondsToSelector:@selector(iconImageWithColor:)]) {
+            // Using labelColor ensures the integer icon adapts perfectly to Light/Dark mode
+            return [[icon iconImageWithColor:[UIColor labelColor]] imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
         }
     }
-    return text;
+    return nil;
 }
-
-static NSAttributedString *interceptTimeAttributedText(NSAttributedString *attributedText) {
-    if (!IsEnabled(@"videoEndTime") || !attributedText || !myyt_globalEndTime) return attributedText;
-    NSString *text = attributedText.string;
-    // Identify the time string (e.g. "-13:51 / 22:34")
-    if (text.length < 30 && [text containsString:@"/"] && [text containsString:@":"]) {
-        if (![text containsString:myyt_globalEndTime]) {
-            NSMutableAttributedString *newAttr = [attributedText mutableCopy];
-            NSDictionary *attrs = [attributedText length] > 0 ? [attributedText attributesAtIndex:attributedText.length - 1 effectiveRange:NULL] : nil;
-            NSAttributedString *appendAttr = [[NSAttributedString alloc] initWithString:[NSString stringWithFormat:@" • %@", myyt_globalEndTime] attributes:attrs];
-            [newAttr appendAttributedString:appendAttr];
-            return newAttr;
-        }
-    }
-    return attributedText;
-}
-
-// Hook all Standard Labels
-%hook UILabel
-- (void)setText:(NSString *)text {
-    %orig(interceptTimeText(text));
-}
-- (void)setAttributedText:(NSAttributedString *)attributedText {
-    %orig(interceptTimeAttributedText(attributedText));
-}
-%end
-
-// Hook YouTube's Custom Labels
-%hook YTLabel
-- (void)setText:(NSString *)text {
-    %orig(interceptTimeText(text));
-}
-- (void)setAttributedText:(NSAttributedString *)attributedText {
-    %orig(interceptTimeAttributedText(attributedText));
-}
-%end
-
-// --- 2. TAP TO SEEK ---
-%hook YTInlinePlayerBarContainerView
-- (void)didPressScrubber:(id)arg1 {
-    %orig;
-    if (!IsEnabled(@"tapToSeek")) return;
-
-    id mainAppController = [self.delegate valueForKey:@"_delegate"];
-    if (mainAppController == nil) return;
-
-    // FIX 2: Explicitly typecast the player view controller
-    YTPlayerViewController *playerViewController = [mainAppController valueForKey:@"parentViewController"];
-
-    if ([arg1 isKindOfClass:[UIGestureRecognizer class]]) {
-        UIGestureRecognizer *gestureRecognizer = (UIGestureRecognizer *)arg1;
-        CGPoint location = [gestureRecognizer locationInView:self];
-        CGFloat x = location.x;
-
-        if ([self respondsToSelector:@selector(scrubRangeForScrubX:)] &&
-            [mainAppController respondsToSelector:@selector(totalTime)] &&
-            [playerViewController respondsToSelector:@selector(seekToTime:)]) {
-            
-            double timestampFraction = [self scrubRangeForScrubX:x];
-            double timestamp = [mainAppController totalTime] * timestampFraction;
-            [playerViewController seekToTime:timestamp];
-        }
-    }
-}
-%end
-
-// --- 3. MEDIA MANAGERS (Post, Comment) ---
-@interface ASDisplayNode : NSObject
-@property (nonatomic, assign, readonly) UIViewController *closestViewController;
-@property (atomic, assign, readonly) NSEnumerator *supernodes;
-@property (atomic) CALayer *layer;
-@end
-
-@interface _ASDisplayView : UIView
-@property (nonatomic, strong, readwrite) ASDisplayNode *keepalive_node;
-- (void)postManager:(UILongPressGestureRecognizer *)sender;
-- (void)commentManager:(UILongPressGestureRecognizer *)sender;
-@end
 
 static void genImageFromLayer(CALayer *layer, UIColor *backgroundColor, void (^completionHandler)(UIImage *)) {
     UIGraphicsBeginImageContextWithOptions(layer.frame.size, NO, 0.0);
     CGContextRef context = UIGraphicsGetCurrentContext();
-    CGContextSetFillColorWithColor(context, backgroundColor.CGColor);
-    CGContextFillRect(context, CGRectMake(0, 0, layer.frame.size.width, layer.frame.size.height));
+    if (backgroundColor) {
+        CGContextSetFillColorWithColor(context, backgroundColor.CGColor);
+        CGContextFillRect(context, CGRectMake(0, 0, layer.frame.size.width, layer.frame.size.height));
+    }
     [layer renderInContext:context];
     UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
     UIGraphicsEndImageContext();
@@ -178,110 +36,142 @@ static void genImageFromLayer(CALayer *layer, UIColor *backgroundColor, void (^c
     }
 }
 
-static void addSafeActionToSheet(id sheet, NSString *title, void (^handler)(void)) {
-    Class actionClass = NSClassFromString(@"YTActionSheetAction");
-    id action = nil;
-    if ([actionClass respondsToSelector:@selector(actionWithTitle:subtitle:iconImage:handler:)]) {
-        action = ((id (*)(Class, SEL, NSString *, NSString *, UIImage *, id))objc_msgSend)(actionClass, @selector(actionWithTitle:subtitle:iconImage:handler:), title, nil, nil, ^(__unused id act) {
-            if (handler) handler();
-        });
-    } else {
-        action = ((id (*)(Class, SEL, NSString *, NSInteger, id))objc_msgSend)(actionClass, @selector(actionWithTitle:style:handler:), title, 0, ^(__unused id act) {
-            if (handler) handler();
-        });
-    }
-    if (action && [sheet respondsToSelector:@selector(addAction:)]) {
-        [sheet performSelector:@selector(addAction:) withObject:action];
-    }
-}
+// ==========================================
+// Text Capture Hooks
+// ==========================================
 
-static NSString *extractTextFromNode(id node) {
-    NSMutableString *result = [NSMutableString string];
-    if ([node respondsToSelector:@selector(attributedText)]) {
-        NSAttributedString *attr = [node performSelector:@selector(attributedText)];
-        if (attr.string) [result appendString:attr.string];
-    } else if ([node respondsToSelector:@selector(text)]) {
-        NSString *text = [node performSelector:@selector(text)];
-        if (text) [result appendString:text];
-    }
-    
-    if ([node respondsToSelector:@selector(subnodes)]) {
-        NSArray *subnodes = [node performSelector:@selector(subnodes)];
-        for (id subnode in subnodes) {
-            NSString *subText = extractTextFromNode(subnode);
-            if (subText.length > 0) {
-                if (result.length > 0) [result appendString:@" "];
-                [result appendString:subText];
+%hook ELMContainerNode
+%property (nonatomic, strong) NSString *copiedComment;
+%property (nonatomic, strong) NSURL *copiedURL;
+%end
+
+%hook ASDisplayNode
+- (void)setFrame:(CGRect)frame {
+    %orig;
+    if (IsEnabled(@"commentManager") && [[self valueForKey:@"_accessibilityIdentifier"] isEqualToString:@"id.comment.content.label"]) {
+        if ([self isKindOfClass:NSClassFromString(@"ASTextNode")]) {
+            ASTextNode *textNode = (ASTextNode *)self;
+            NSString *comment = textNode.attributedText ? textNode.attributedText.string : nil;
+            for (ELMContainerNode *containerNode in self.supernodes.allObjects) {
+                if ([containerNode.description containsString:@"id.ui.comment_cell"] && comment) {
+                    containerNode.copiedComment = comment;
+                    break;
+                }
             }
         }
     }
-    return result.copy;
+    if (IsEnabled(@"postManager") && [self isKindOfClass:NSClassFromString(@"ELMExpandableTextNode")]) {
+        ELMExpandableTextNode *expandableTextNode = (ELMExpandableTextNode *)self;
+        if ([expandableTextNode.currentTextNode isKindOfClass:NSClassFromString(@"ASTextNode")]) {
+            ASTextNode *textNode = (ASTextNode *)expandableTextNode.currentTextNode;
+            NSString *text = textNode.attributedText ? textNode.attributedText.string : nil;
+            for (ELMContainerNode *containerNode in self.supernodes.allObjects) {
+                if ([containerNode.description containsString:@"id.ui.backstage.original_post"] && text) {
+                    containerNode.copiedComment = text;
+                    break;
+                }
+            }
+        }
+    }
 }
+%end
+
+// ==========================================
+// Gesture & Action Sheet Hooks
+// ==========================================
 
 %hook _ASDisplayView
 - (void)setKeepalive_node:(id)arg1 {
     %orig;
-    NSArray *gesturesInfo = @[
-        @{@"selector": @"postManager:", @"text": @"id.ui.backstage.original_post", @"key": @(IsEnabled(@"postManager"))},
-        @{@"selector": @"commentManager:", @"text": @"id.ui.comment_cell", @"key": @(IsEnabled(@"commentManager"))}
-    ];
-
-    for (NSDictionary *gestureInfo in gesturesInfo) {
-        SEL selector = NSSelectorFromString(gestureInfo[@"selector"]);
-        if ([gestureInfo[@"key"] boolValue] && [[self description] containsString:gestureInfo[@"text"]]) {
-            UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:selector];
-            longPress.minimumPressDuration = 0.3;
-            [self addGestureRecognizer:longPress];
-            break;
-        }
+    if (IsEnabled(@"postManager") && [[self description] containsString:@"id.ui.backstage.original_post"]) {
+        UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handlePostManager:)];
+        longPress.minimumPressDuration = 0.3;
+        [self addGestureRecognizer:longPress];
+    }
+    if (IsEnabled(@"commentManager") && [[self description] containsString:@"id.ui.comment_cell"]) {
+        UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleCommentManager:)];
+        longPress.minimumPressDuration = 0.3;
+        [self addGestureRecognizer:longPress];
     }
 }
 
 %new
-- (void)postManager:(UILongPressGestureRecognizer *)sender {
+- (void)handlePostManager:(UILongPressGestureRecognizer *)sender {
     if (sender.state == UIGestureRecognizerStateBegan) {
-        ASDisplayNode *node = self.keepalive_node;
-        NSString *text = extractTextFromNode(node);
+        ELMContainerNode *containerNode = (ELMContainerNode *)self.keepalive_node;
+        NSString *text = containerNode.copiedComment;
         CALayer *layer = self.layer;
-        UIColor *backgroundColor = node.closestViewController.view.backgroundColor;
-
-        id sheetController = [%c(YTDefaultSheetController) sheetControllerWithParentResponder:nil];
+        UIViewController *closestVC = containerNode.closestViewController;
+        UIColor *backgroundColor = closestVC.view.backgroundColor;
+        YTDefaultSheetController *sheetController = [%c(YTDefaultSheetController) sheetControllerWithParentResponder:nil];
         
-        addSafeActionToSheet(sheetController, @"Copy Post Text", ^{
-            if (text.length > 0) [UIPasteboard generalPasteboard].string = text;
-        });
-        
-        addSafeActionToSheet(sheetController, @"Save Post As Image", ^{
+        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Translate post" iconImage:GetImageForYTInteger(897) style:0 handler:^ {
+            [YTTranslateManager presentTranslationForText:text fromPresenter:closestVC];
+        }]];
+        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Copy post text" iconImage:GetImageForYTInteger(243) style:0 handler:^ {
+            if (text) {
+                [UIPasteboard generalPasteboard].string = text;
+                [YTPillToast showSuccessWithMessage:@"Copied to clipboard"];
+            } else {
+                [YTPillToast showErrorWithMessage:@"No text found to copy"];
+            }
+        }]];
+        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Save post as image" iconImage:GetImageForYTInteger(367) style:0 handler:^ {
             genImageFromLayer(layer, backgroundColor, ^(UIImage *image) {
-                UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil);
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [YTPillToast showImageActionToastWithImage:image text:@"Download completed" presenter:closestVC];
+                });
             });
-        });
-
-        [sheetController presentFromViewController:node.closestViewController animated:YES completion:nil];
+        }]];
+        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Copy post as image" iconImage:GetImageForYTInteger(208) style:0 handler:^ {
+            genImageFromLayer(layer, backgroundColor, ^(UIImage *image) {
+                if (image) {
+                    [UIPasteboard generalPasteboard].image = image;
+                    [YTPillToast showSuccessWithMessage:@"Copied to clipboard"];
+                }
+            });
+        }]];
+        [sheetController presentFromViewController:closestVC animated:YES completion:nil];
     }
 }
 
 %new
-- (void)commentManager:(UILongPressGestureRecognizer *)sender {
+- (void)handleCommentManager:(UILongPressGestureRecognizer *)sender {
     if (sender.state == UIGestureRecognizerStateBegan) {
-        ASDisplayNode *node = self.keepalive_node;
-        NSString *comment = extractTextFromNode(node);
+        ELMContainerNode *containerNode = (ELMContainerNode *)self.keepalive_node;
+        NSString *comment = containerNode.copiedComment;
         CALayer *layer = self.layer;
-        UIColor *backgroundColor = node.closestViewController.view.backgroundColor;
+        UIViewController *closestVC = containerNode.closestViewController;
+        UIColor *backgroundColor = closestVC.view.backgroundColor;
+        YTDefaultSheetController *sheetController = [%c(YTDefaultSheetController) sheetControllerWithParentResponder:nil];
 
-        id sheetController = [%c(YTDefaultSheetController) sheetControllerWithParentResponder:nil];
-        
-        addSafeActionToSheet(sheetController, @"Copy Comment Text", ^{
-            if (comment.length > 0) [UIPasteboard generalPasteboard].string = comment;
-        });
-        
-        addSafeActionToSheet(sheetController, @"Save Comment As Image", ^{
+        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Translate comment" iconImage:GetImageForYTInteger(897) style:0 handler:^ {
+            [YTTranslateManager presentTranslationForText:comment fromPresenter:closestVC];
+        }]];
+        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Copy comment text" iconImage:GetImageForYTInteger(243) style:0 handler:^ {
+            if (comment) {
+                [UIPasteboard generalPasteboard].string = comment;
+                [YTPillToast showSuccessWithMessage:@"Copied to clipboard"];
+            } else {
+                [YTPillToast showErrorWithMessage:@"No text found to copy"];
+            }
+        }]];
+        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Save comment as image" iconImage:GetImageForYTInteger(367) style:0 handler:^ {
             genImageFromLayer(layer, backgroundColor, ^(UIImage *image) {
-                UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil);
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [YTPillToast showImageActionToastWithImage:image text:@"Download completed" presenter:closestVC];
+                });
             });
-        });
-
-        [sheetController presentFromViewController:node.closestViewController animated:YES completion:nil];
+        }]];
+        [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Copy comment as image" iconImage:GetImageForYTInteger(208) style:0 handler:^ {
+            genImageFromLayer(layer, backgroundColor, ^(UIImage *image) {
+                if (image) {
+                    [UIPasteboard generalPasteboard].image = image;
+                    [YTPillToast showSuccessWithMessage:@"Copied to clipboard"];
+                }
+            });
+        }]];
+        [sheetController presentFromViewController:closestVC animated:YES completion:nil];
     }
 }
 %end
